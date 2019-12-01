@@ -8,6 +8,7 @@ import curver_config as config
 
 ############
 # TODO: 
+# + Write captions and unify colors in examples
 # + Use EMST for "ball"
 # + Use iterative ball radius until sufficient correlation in 3D
 # + Use weighting (by distance; w_i in paper) of line, quadratic, plane regressions!
@@ -246,7 +247,7 @@ def thin_single_pt_3d(pt, all_pts, ax=None):
     if ax is not None:
         # If PLT axis is passed, draw points
 
-        grid = np.linspace(-1.5, 1.5, 50)
+        grid = np.linspace(-3.0, 3.0, 50)
         plane_pts = np.array([ (x, y, plane(x, y)) for x in grid for y in grid ])
         mapped_plane_pts = map_pts(plane_pts)
 

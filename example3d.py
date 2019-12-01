@@ -40,9 +40,13 @@ ax.scatter(*(pts_with_noise.T), color='red', alpha=0.5)
 plt.show()
 
 
+ax = make_ax()
+curver.thin_single_pt_3d(pts[38], pts, ax=ax)
+plt.show()
+
+
 #return
 
-#curver.thin_single_pt_3d(pts[38], pts, ax=ax)
 
 res_pts = pts_with_noise
 for i in range(NUM_ITERATIONS):
