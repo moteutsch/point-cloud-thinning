@@ -8,11 +8,12 @@ import curver_config as config
 
 ############
 # TODO: 
-# + Use EMST
-# + TODO: Use weighting of line, quadratic, plane!
-# + 3d
+# + Use EMST for "ball"
+# + Use iterative ball radius until sufficient correlation in 3D
+# + Use weighting (by distance; w_i in paper) of line, quadratic, plane regressions!
 ############
 
+# Given two point sets containing: GT and predictions (note: points don't correspond 1-1); compute mean l^2 error of points from GT; 
 def l2_error(gt_pts, pred_pts):
     return np.array([
         min([ np.linalg.norm(pred_pt - gt_pt) for gt_pt in gt_pts ]) # Distance between "pred_pt" and "gt_pts" (pt from set)
@@ -20,55 +21,51 @@ def l2_error(gt_pts, pred_pts):
     ]).mean()
 
 
-#pts = [ np.polynomial.polynomial.polyval(t, p) for t in np.linspace(-10, 10, 20) ]
+# Generate points on a circle
 def circle(how_many_pts):
     return np.array([ (np.sin(t), np.cos(t)) for t in np.linspace(0, 2 * np.pi, how_many_pts) ])
 
+# Generate points on a polynomial with coefficients "c"
 def polynomial_curve(c, how_many_pts):
     poly = np.poly1d(c)
     return np.array([ (t, poly(t)) for t in np.linspace(-2, 2, how_many_pts) ])
 
-def pts_with_noise(c, n, sigma=0.05):
+# Generate "n" points on curve "curve(t)" (a function taking a single parameter "t") with normal noise of STD "sigma"
+def pts_with_noise(curve, n, sigma=0.05):
     #return c(n) + np.random.normal(0, sigma, size=(n, 2))
-    return np.array([ a + np.random.normal(0, sigma * (abs((1 - abs(a[0]))) ** (1/2)) * 2, size=(len(a))) for a in c(n) ])
+    return np.array([ a + np.random.normal(0, sigma * (abs((1 - abs(a[0]))) ** (1/2)) * 2, size=(len(a))) for a in curve(n) ])
 
+# A ball of radius "r" around point "center" from points "all_pts"
 def ball(center, r, all_pts):
     return np.array([ pt for pt in all_pts if np.linalg.norm(center - pt) < r ])
 
+# Complement of the ball (see "ball()")
 def ball_c(center, r, all_pts):
     return np.array([ pt for pt in all_pts if np.linalg.norm(center - pt) >= r ])
 
 
-
+# Compute linear regression line for "pts" ("p" is not used now, but will be used if we implement
+# weighted linear regression--less cost for points that are far away from "p")
 def linear_regression_line(pts, p):
     x = pts[:, 0]
     y = pts[:, 1]
-    p0 = 0, 1 # initial guess
-
-    #popt, pcov = curve_fit(f, x, y, p0, sigma=sigma, absolute_sigma=True)
-    #slope, intercept, r_value, p_value, std_err = stats.linregress(x,y)
     res = scipy.stats.linregress(x, y)
-    #print("Linera reg", res, pts)
-    #print(x)
     return res
 
-    #popt, pcov = curve_fit(f, x, y, p0)
-    #print(pot, pcov)
-    #return popt, pcov
 
-
+# 2d rotation matrix for angle "theta"
 def rot(theta):
     return np.array([
         [ np.cos(theta), -np.sin(theta) ],
         [ np.sin(theta), np.cos(theta) ]
     ])
 
+
+# Compute point pearson correlation of points after rotating by angle of best linear regession line
 def pt_correlations(pts, p):
     s, i, _, _, _ = linear_regression_line(pts, p)
 
     # Transform the pt set so that line is parallel to x-axis and p is origin
-    #assert (p == np.array([0, i])).all()
-    #print((0, i))
 
     if np.isnan(s):
         # Infinite slope: i.e., vertical line 
@@ -77,11 +74,6 @@ def pt_correlations(pts, p):
         theta = np.arctan(s)
 
     R = rot((np.pi / 4) - theta)
-
-    #### TODO: Remove
-    #r = np.array([ R.dot((t, s * t + i) - p) + p for t in np.linspace(-0.5, 0.5, 100) ])
-    #plt.scatter(*(r.T), c='green', s=0.1)
-    ####
 
     pts2 = np.array([ R.dot(pt - p) for pt in pts ])
     p2 = p - p
@@ -92,7 +84,15 @@ def pt_correlations(pts, p):
     return rho, pts2
 
 
-# TODO: Weighted regressions?
+# Compute best quadratic regression curve that fits "pts" focused around point "p"
+# We do this by:
+# 1. finding linear regression line L
+# 2. applying an affine transformation so that "p" is at origin and L = x-axis
+# 3. Finding best quadratic appoximation function
+# 4. Rotating back
+#
+# Note that rotations are necessary as, if "pts" form a vertical semi-circle, the best quadratic curve
+# isn't a function y(x) (it isn't single-valued). But after rotation, it will be.
 def quadractic_regression_curve(pts, p, plot=False):
     s, i, _, _, _ = linear_regression_line(pts, p)
     if np.isnan(s):
@@ -124,20 +124,19 @@ def quadractic_regression_curve(pts, p, plot=False):
     return z, p_proj
 
 
-
-    # TODO: Inverse operation
-
-# Algorithm2 = Collect2 (non-iterative version--contents of loop)
+# Collect2 algorithm from paper (non-iterative version--contents of loop)
 def collect2(pt, r, corr_tol, r_step, all_pts):
-    #print("## Collect2")
     H = r
-    rho = 0
+    rho = 0 # initial value--no chance of passing threshold
 
-    i = 0
+    i = 0 # Count number of iterations
+
+    # We increase the size of ball of points around "pt" that are used for regressions
+    # until their Pearson-coefficient passes "corr_tol" tolerance
     while abs(rho) < corr_tol:
         i += 1
-        #assert i < 10 # Max steps until crash
         if i >= config.two_dim['max_collect2_iterations']:
+            # Max steps until failure
             return None
 
         A = ball(pt, H, all_pts)
@@ -156,6 +155,8 @@ def collect2(pt, r, corr_tol, r_step, all_pts):
     return A
 
 
+# Perform 2D curve "thinning" for point "pt"
+# Returns where "pt" is projected to
 def thin_single_pt_2d(pt, all_pts):
     r = config.two_dim['r']
     r_step = config.two_dim['r_step']
@@ -170,6 +171,9 @@ def thin_single_pt_2d(pt, all_pts):
     return pt_proj
 
 
+# Perform 2D curve "thinning" for all points
+# Returns projections of all points
+# Some points may be lost if they fail to reach correlation threshold
 def thin_pt_cloud_2d(pts):
     new_pts = []
     for pt in pts:
@@ -185,17 +189,23 @@ def thin_pt_cloud_2d(pts):
 
     return np.array(new_pts)
 
+########################
 ########## 3D
+#######################
 
-# TODO: Collect2 for 3D
-
+# Perform 3D curve "thinning" for point "pt"
+# Returns where "pt" is projected to
+# Currently non-iterative: works with fixed radius of ball
+# Finds best plane regression around point "pt", projects points (in nbhd) onto this plane
+# and does 2D algorithm (for a single point) on this plane. Then back-projects resulting point 
+# back to 3D
+# 
+# If "ax" is passed (PLT axis) it will draw the transformations onto it
 def thin_single_pt_3d(pt, all_pts, ax=None):
     
-    # TODO: Iterative
-
     H = config.three_dim['r']
 
-    A = ball(pt, H, all_pts) # TODO: EMST
+    A = ball(pt, H, all_pts)
     M = np.vstack(
         (
             np.ones(len(A)),
@@ -267,7 +277,10 @@ def thin_single_pt_3d(pt, all_pts, ax=None):
 
     return res_3d
 
-    
+
+# Perform 3D curve "thinning" for all points
+# Returns projections of all points
+# Some points may be lost if they fail to reach correlation threshold
 def thin_pt_cloud_3d(pts, ax=None):
     new_pts = []
     for pt in pts:
