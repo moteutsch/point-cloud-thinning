@@ -4,6 +4,14 @@ import networkx as nx
 from scipy.optimize import minimize, curve_fit
 import scipy.stats
 
+############
+# TODO: 
+# + Use EMST
+# + TODO: Use weighting of line, quadratic, plane!
+# + 3d
+############
+
+
 #pts = [ np.polynomial.polynomial.polyval(t, p) for t in np.linspace(-10, 10, 20) ]
 def circle(how_many_pts):
     return np.array([ (np.sin(t), np.cos(t)) for t in np.linspace(0, 2 * np.pi, how_many_pts) ])
@@ -137,3 +145,24 @@ def thin_pt_cloud(pts):
             new_pts.append(p_proj)
 
     return np.array(new_pts)
+
+########## 3D
+
+# TODO: Collect2 for 3D
+
+def thin_pt_cloud_3d(pts):
+    
+    H = 0.5
+
+    for p in pts:
+        A = ball(p, H, pts) # TODO: EMST
+        M = np.vstack(
+            (
+                np.ones(len(pts)),
+                (pts.T)[0:2]
+            )
+        )
+        print(M.shape)
+        break
+
+
