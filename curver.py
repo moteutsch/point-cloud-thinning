@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from scipy.optimize import minimize, curve_fit
 import scipy.stats
+from scipy.spatial.transform import Rotation as R
 
 ############
 # TODO: 
@@ -128,21 +129,28 @@ def collect2(pt, r, corr_tol, r_step, all_pts, max_iters=30):
     return A
 
 
-def thin_pt_cloud(pts):
+def thin_single_pt_2d(pt, all_pts):
     r = 0.35
     r_step = 0.03
-    corr_tol = 0.7
+    corr_tol = 0.5
 
+    A = collect2(pt, r, corr_tol, r_step, all_pts)
+    if A is None:
+        print("### Warning: Could not find nbhd with sufficient correlation")
+        # Simply don't modify p
+        #new_pts.append(p)
+        return None
+    else:
+        curve, pt_proj = quadractic_regression_curve(A, pt)
+        return pt_proj
+
+
+def thin_pt_cloud(pts):
     new_pts = []
-    for p in pts:
-        A = collect2(p, r, corr_tol, r_step, pts)
-        if A is None:
-            print("### Warning: Could not find nbhd with sufficient correlation")
-            # Simply don't modify p
-            #new_pts.append(p)
-        else:
-            curve, p_proj = quadractic_regression_curve(A, p)
-            new_pts.append(p_proj)
+    for pt in pts:
+        res = thin_single_pt_2d(pt, pts)
+        if res is not None:
+            new_pts.append(res)
 
     return np.array(new_pts)
 
@@ -150,19 +158,96 @@ def thin_pt_cloud(pts):
 
 # TODO: Collect2 for 3D
 
-def thin_pt_cloud_3d(pts):
+def thin_single_pt_3d(pt, all_pts, ax=None):
     
-    H = 0.5
+    # TODO: Iterative
+    H = 0.35 
 
-    for p in pts:
-        A = ball(p, H, pts) # TODO: EMST
-        M = np.vstack(
-            (
-                np.ones(len(pts)),
-                (pts.T)[0:2]
-            )
+
+    #for pt in pts:
+    #pt = all_pts[80]
+    A = ball(pt, H, all_pts) # TODO: EMST
+    M = np.vstack(
+        (
+            np.ones(len(A)),
+            (A.T)[0:2]
         )
-        print(M.shape)
-        break
+    ).T
+    print("M5", M[:5, :])
+    print("A5", A[:5, :])
+    z = A[:, 2]
+    print("z5", z[:5])
 
+    p, res, rnk, s = scipy.linalg.lstsq(M, z)
+    print(p, res, rnk, s)
+
+
+    def plane(x, y):
+        return p[0] + p[1] * x + p[2] * y
+
+
+    # TODO: Rename
+    how_many_pts = 50
+    grid = np.linspace(-1.5, 0.5, how_many_pts)
+    plane_pts = np.array([ (x, y, plane(x, y)) for x in grid for y in grid ])
+
+    # Tranform our plane to the plane {z = 0}
+    #plane_rot = R.from_euler('xy', [np.arctan(p[1]), np.arctan(p[2])]).as_dcm()
+    plane_rot = R.from_euler('xy', [-np.arctan(p[2]), np.arctan(p[1])]).as_dcm()
+    plane_rot_inv = np.linalg.inv(plane_rot)
+
+    new_origin = np.array((0, 0, p[0]))
+
+    #pts_at = plane_rot.dot((plane_pts - new_origin).T).T
+    print(plane_pts[:5])
+    
+    def map_pts(pt_set):
+        return np.array([ plane_rot.dot((a_pt - new_origin).T) for a_pt in pt_set ])
+
+    def inv_map_pts(pt_set):
+        return np.array([ plane_rot_inv.dot(a_pt) + new_origin for a_pt in pt_set ])
+
+    mapped_plane_pts = map_pts(plane_pts)
+
+    # For some reason this doesn't send exactly to z = 0; so keep track of error in z
+    avg_z_err = mapped_plane_pts[:, 2].mean()
+    print('Average z error on plane', avg_z_err)
+
+    print('After transform', mapped_plane_pts[:5])
+
+    if ax is not None:
+        ax.scatter(*(A.T), s=40, color='green')
+        ax.scatter( *(np.array([ pt ]).T), color='grey', s=100)
+        ax.scatter(*(plane_pts.T), s=0.3, color='orange')
+        ax.scatter(*(mapped_plane_pts.T), s=0.3, color='yellow')
+        ax.scatter(*((map_pts(A)).T), s=30, color='cyan')
+
+    # 2D projection
+    pt_on_plane = map_pts([pt])[0]
+    res_2d = thin_single_pt_2d(pt_on_plane[:2], mapped_plane_pts[:, :2])
+    if res_2d is None:
+        # TODO: Better
+        print("3D WARNING!")
+        return
+
+    # We make it back to a 3D on mapped plane (we put the original coordinate and not "0" 
+    # as there might be a small error in z-coordinate when projecting (maybe pt_on_plane[2] /= 0)
+
+
+    res_3d_mapped = np.hstack((res_2d, pt_on_plane[2]))
+    #res_3d_mapped = np.hstack((res_2d, 0))
+    res_3d = inv_map_pts([ res_3d_mapped ])[0]
+
+    if ax is not None:
+        ax.scatter( *(np.array([ res_3d ]).T), color='black', s=100)
+
+    
+def thin_pt_cloud_3d(pts, ax=None):
+    new_pts = []
+    for pt in pts:
+        res = thin_single_pt_3d(pt, pts, ax=ax)
+        if res is not None:
+            new_pts.append(res)
+
+    return np.array(new_pts)
 
