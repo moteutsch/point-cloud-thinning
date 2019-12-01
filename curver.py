@@ -8,8 +8,13 @@ import scipy.stats
 def circle(how_many_pts):
     return np.array([ (np.sin(t), np.cos(t)) for t in np.linspace(0, 2 * np.pi, how_many_pts) ])
 
+def polynomial_curve(c, how_many_pts):
+    poly = np.poly1d(c)
+    return np.array([ (t, poly(t)) for t in np.linspace(-2, 2, how_many_pts) ])
+
 def pts_with_noise(c, n, sigma=0.05):
-    return c(n) + np.random.normal(0, sigma, size=(n, 2))
+    #return c(n) + np.random.normal(0, sigma, size=(n, 2))
+    return np.array([ a + np.random.normal(0, sigma * (abs((1 - abs(a[0]))) ** (1/2)) * 2, size=(2)) for a in c(n) ])
 
 def ball(center, r, all_pts):
     return np.array([ pt for pt in all_pts if np.linalg.norm(center - pt) < r ])
@@ -75,7 +80,7 @@ def quadractic_regression_curve(pts, p, plot=False):
     if plot:
         # Plot:
         poly = np.poly1d(z)
-        poly_pts = np.array([ R_inv.dot((t, poly(t))) + p for t in np.linspace(-0.2, 0.2, 100) ])
+        poly_pts = np.array([ R_inv.dot((t, poly(t))) + p for t in np.linspace(-0.3, 0.3, 100) ])
         plt.scatter(*(poly_pts.T), c='cyan', s=0.1)
         #
 
@@ -93,7 +98,7 @@ def quadractic_regression_curve(pts, p, plot=False):
     # TODO: Inverse operation
 
 # Algorithm2 = Collect2 (non-iterative version--contents of loop)
-def collect2(pt, r, corr_tol, r_step, all_pts):
+def collect2(pt, r, corr_tol, r_step, all_pts, max_iters=30):
     #print("## Collect2")
     H = r
     rho = -1
@@ -102,7 +107,7 @@ def collect2(pt, r, corr_tol, r_step, all_pts):
     while rho < corr_tol:
         i += 1
         #assert i < 10 # Max steps until crash
-        if i >= 10:
+        if i >= max_iters:
             return None
 
         A = ball(pt, H, all_pts)
@@ -115,7 +120,7 @@ def collect2(pt, r, corr_tol, r_step, all_pts):
 
 
 def thin_pt_cloud(pts):
-    r = 0.25
+    r = 0.35
     r_step = 0.03
     corr_tol = 0.7
 
@@ -135,16 +140,22 @@ def thin_pt_cloud(pts):
         
 ########################
 
+NUM_PTS = 100
+CURVE = circle
+#CURVE = lambda x: polynomial_curve([1, 0, 0], x)
+
 plt.gca().set_aspect('equal', adjustable='box')
         
-plt.scatter(*(circle(200).T))
-plt.show()
+plt.scatter(*(CURVE(NUM_PTS).T))
 
-all_pts = pts_with_noise(circle, 200, 0.05)
+all_pts = pts_with_noise(CURVE, NUM_PTS, 0.05)
+
+plt.scatter(*(all_pts).T, alpha=0.5, c='green')
+plt.show()
 #all_pts = ball_c(all_pts[50], 0.3, all_pts)
 
 #all_pts = np.setdiff1d(all_pts, b)
-print(all_pts)
+#print(all_pts)
 
 
 
@@ -166,7 +177,7 @@ plt.scatter(*(b.T), c='yellow')
 
 rl = linear_regression_line(b, all_pts[0])
 (slope, intercept, _, _, _) = rl
-print(slope)
+#print(slope)
 r = np.array([ (t, slope * t + intercept) for t in np.linspace(-0.5, 0.5, 100) ])
 
 plt.scatter(*(r.T), c='orange', s=0.1)
@@ -174,7 +185,7 @@ plt.scatter(*(r.T), c='orange', s=0.1)
 # Pt. correlations test
 
 rho, rot_pts = pt_correlations(b, all_pts[0])
-print("Correlation", rho)
+#print("Correlation", rho)
 
 # Quadratic regression curve
 
@@ -205,10 +216,10 @@ plt.gca().set_aspect('equal', adjustable='box')
 plt.show()
 
 n = thinned_p2 
-for i in range(4):
+for i in range(3):
     n = thin_pt_cloud(n)
 
-    plt.scatter(*(circle(200).T), alpha=0.3)
+    plt.scatter(*(CURVE(NUM_PTS).T), alpha=0.3)
     plt.scatter(*(all_pts.T), alpha=0.3, c='green')
     plt.scatter(*(n.T), alpha=1, c='orange')
 
