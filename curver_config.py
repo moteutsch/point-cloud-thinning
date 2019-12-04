@@ -1,15 +1,22 @@
-is_debug = True
+is_debug = False
 
 two_dim = {
-    'r': 0.35,
-    'r_step': 0.03,
+    #'r': 0.3,
+    #'r_step': 0.05,
+
+    'r': 100.0,
+    'r_step': 0.15,
+
     'min_correlation': 0.7,
-    'remove_low_correlation_pts': False,
-    'max_collect2_iterations': 20
+    'remove_low_correlation_pts': True,
+    #'max_collect2_iterations': 50
+    'max_collect2_iterations': 2
 }
 
 three_dim = {
-    'r': 1.5,
-    'remove_low_correlation_pts': False
+    'r': 4.0,
+    'r_step': 0.3,
+    'max_collect2_iterations': 4,
+    'remove_low_correlation_pts': True
 }
 

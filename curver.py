@@ -22,6 +22,8 @@ def l2_error(gt_pts, pred_pts):
     ]).mean()
 
 
+
+
 # Generate points on a circle
 def circle(how_many_pts):
     return np.array([ (np.sin(t), np.cos(t)) for t in np.linspace(0, 2 * np.pi, how_many_pts) ])
@@ -78,10 +80,21 @@ def pt_correlations(pts, p):
 
     pts2 = np.array([ R.dot(pt - p) for pt in pts ])
     p2 = p - p
+        
 
     #print(s, theta, R, pts, pts2)
     #print("INFO", s, theta, R, pts, pts2)
     rho, _ = scipy.stats.pearsonr(*(pts2.T))
+
+    if config.is_debug:
+        print("Pearson: %s" % rho)
+        
+        line_pts = np.array([ (t, t) for t in np.linspace(-5, 5, 100) ])
+
+        plt.scatter(*(pts.T), color='red', alpha=0.5)
+        plt.scatter(*(line_pts.T), color='purple', alpha=0.3, s=0.5)
+        plt.show()
+
     return rho, pts2
 
 
@@ -134,17 +147,19 @@ def collect2(pt, r, corr_tol, r_step, all_pts):
 
     # We increase the size of ball of points around "pt" that are used for regressions
     # until their Pearson-coefficient passes "corr_tol" tolerance
+
+    H -= r_step # To balance addition at beginning
     while abs(rho) < corr_tol:
+        H += r_step
         i += 1
         if i >= config.two_dim['max_collect2_iterations']:
             # Max steps until failure
             return None
 
         A = ball(pt, H, all_pts)
-        H += r_step
-        if len(A) <= 2: 
+        if len(A) <= 5: 
             print("##### Warning: Not enough points for correlation")
-            print("Debug info; pt:", pt, "H:", H, "all_pts:", all_pts)
+            print("Debug info; pt:", pt, "H:", H, "A:", len(A))
             print()
             continue # Not enough points for correlation
 
@@ -206,76 +221,83 @@ def thin_single_pt_3d(pt, all_pts, ax=None):
     
     H = config.three_dim['r']
 
-    A = ball(pt, H, all_pts)
-    M = np.vstack(
-        (
-            np.ones(len(A)),
-            (A.T)[0:2]
-        )
-    ).T
-    z = A[:, 2]
+    for i in range(config.three_dim['max_collect2_iterations']):
 
-    p, res, rnk, s = scipy.linalg.lstsq(M, z)
-    #print(p, res, rnk, s)
+        if config.is_debug:
+            print('Doing 3D point thinning with H = %s' % H)
 
-    def plane(x, y):
-        return p[0] + p[1] * x + p[2] * y
+        A = ball(pt, H, all_pts)
+        M = np.vstack(
+            (
+                np.ones(len(A)),
+                (A.T)[0:2]
+            )
+        ).T
+        z = A[:, 2]
 
-    # Tranform our plane to the plane {z = 0}
-    #plane_rot = R.from_euler('xy', [np.arctan(p[1]), np.arctan(p[2])]).as_dcm()
-    plane_rot = R.from_euler('xy', [-np.arctan(p[2]), np.arctan(p[1])]).as_dcm()
-    plane_rot_inv = np.linalg.inv(plane_rot)
+        p, res, rnk, s = scipy.linalg.lstsq(M, z)
+        #print(p, res, rnk, s)
 
-    new_origin = np.array((0, 0, p[0]))
+        def plane(x, y):
+            return p[0] + p[1] * x + p[2] * y
 
-    #pts_at = plane_rot.dot((plane_pts - new_origin).T).T
-    #print(plane_pts[:5])
-    
-    def map_pts(pt_set):
-        return np.array([ plane_rot.dot((a_pt - new_origin).T) for a_pt in pt_set ])
+        # Tranform our plane to the plane {z = 0}
+        #plane_rot = R.from_euler('xy', [np.arctan(p[1]), np.arctan(p[2])]).as_dcm()
+        plane_rot = R.from_euler('xy', [-np.arctan(p[2]), np.arctan(p[1])]).as_dcm()
+        plane_rot_inv = np.linalg.inv(plane_rot)
 
-    def inv_map_pts(pt_set):
-        return np.array([ plane_rot_inv.dot(a_pt) + new_origin for a_pt in pt_set ])
+        new_origin = np.array((0, 0, p[0]))
+
+        #pts_at = plane_rot.dot((plane_pts - new_origin).T).T
+        #print(plane_pts[:5])
+        
+        def map_pts(pt_set):
+            return np.array([ plane_rot.dot((a_pt - new_origin).T) for a_pt in pt_set ])
+
+        def inv_map_pts(pt_set):
+            return np.array([ plane_rot_inv.dot(a_pt) + new_origin for a_pt in pt_set ])
 
 
-    # For some reason this doesn't send exactly to z = 0; so keep track of error in z
-    #avg_z_err = mapped_plane_pts[:, 2].mean()
-    #print('Average z error on plane', avg_z_err)
+        # For some reason this doesn't send exactly to z = 0; so keep track of error in z
+        #avg_z_err = mapped_plane_pts[:, 2].mean()
+        #print('Average z error on plane', avg_z_err)
 
-    #print('After transform', mapped_plane_pts[:5])
+        #print('After transform', mapped_plane_pts[:5])
 
-    if ax is not None:
-        # If PLT axis is passed, draw points
+        if ax is not None:
+            # If PLT axis is passed, draw points
 
-        grid = np.linspace(-3.0, 3.0, 50)
-        plane_pts = np.array([ (x, y, plane(x, y)) for x in grid for y in grid ])
-        mapped_plane_pts = map_pts(plane_pts)
+            grid = np.linspace(-3.0, 3.0, 50)
+            plane_pts = np.array([ (x, y, plane(x, y)) for x in grid for y in grid ])
+            mapped_plane_pts = map_pts(plane_pts)
 
-        ax.scatter(*(A.T), s=40, color='green')
-        ax.scatter( *(np.array([ pt ]).T), color='grey', s=100)
-        ax.scatter(*(plane_pts.T), s=0.3, color='orange')
-        ax.scatter(*(mapped_plane_pts.T), s=0.3, color='yellow')
-        ax.scatter(*((map_pts(A)).T), s=30, color='cyan')
+            ax.scatter(*(A.T), s=40, color='green')
+            ax.scatter( *(np.array([ pt ]).T), color='grey', s=100)
+            ax.scatter(*(plane_pts.T), s=0.3, color='orange')
+            ax.scatter(*(mapped_plane_pts.T), s=0.3, color='yellow')
+            ax.scatter(*((map_pts(A)).T), s=30, color='cyan')
 
-    # 2D projection
-    pt_on_plane = map_pts([pt])[0]
-    mapped_A = map_pts(A)
-    res_2d = thin_single_pt_2d(pt_on_plane[:2], mapped_A[:, :2])
+        # 2D projection
+        pt_on_plane = map_pts([pt])[0]
+        mapped_A = map_pts(A)
+        res_2d = thin_single_pt_2d(pt_on_plane[:2], mapped_A[:, :2])
+        if res_2d is None:
+            print('Low correlation with %s:' % H)
+            H += config.three_dim['r_step']
+            continue
+
+        # We make it back to a 3D on mapped plane (we put the original coordinate and not "0" 
+        # as there might be a small error in z-coordinate when projecting (maybe pt_on_plane[2] /= 0)
+
+        res_3d_mapped = np.hstack((res_2d, pt_on_plane[2]))
+        #res_3d_mapped = np.hstack((res_2d, 0))
+        res_3d = inv_map_pts([ res_3d_mapped ])[0]
+
+        if ax is not None:
+            ax.scatter( *(np.array([ res_3d ]).T), color='black', s=100)
+
     if res_2d is None:
-
-        print("### 3D WARNING: Low correlation point")
         return None
-
-    # We make it back to a 3D on mapped plane (we put the original coordinate and not "0" 
-    # as there might be a small error in z-coordinate when projecting (maybe pt_on_plane[2] /= 0)
-
-    res_3d_mapped = np.hstack((res_2d, pt_on_plane[2]))
-    #res_3d_mapped = np.hstack((res_2d, 0))
-    res_3d = inv_map_pts([ res_3d_mapped ])[0]
-
-    if ax is not None:
-        ax.scatter( *(np.array([ res_3d ]).T), color='black', s=100)
-
     return res_3d
 
 
