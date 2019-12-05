@@ -4,16 +4,20 @@ import numpy as np
 
 ########################
 
-NUM_PTS = 120
-CURVE = curver.circle
-#CURVE = lambda x: polynomial_curve([1, 0, 0], x)
+#NUM_PTS = 120
+NUM_PTS = 150
+#CURVE = curver.circle
+#CURVE = lambda x: curver.polynomial_curve([1, 0, -8, 0, 0], x * 2)
+def CURVE(n): 
+    return curver.polynomial_curve([1/50, 0, -8/50, 0, 0], n, 4)
 
 plt.gca().set_aspect('equal', adjustable='box')
         
 plt.scatter(*(CURVE(NUM_PTS).T))
 
 no_noise_pts = CURVE(NUM_PTS)
-all_pts = curver.pts_with_noise(CURVE, NUM_PTS, 0.12)
+#all_pts = curver.pts_with_noise(CURVE, NUM_PTS, 0.12)
+all_pts = curver.pts_with_noise(CURVE, NUM_PTS, 0.07)
 
 print("L2 error of original pts:", curver.l2_error(no_noise_pts, no_noise_pts))
 print("L2 error of noisy pts:", curver.l2_error(no_noise_pts, all_pts))
@@ -74,7 +78,7 @@ plt.show()
 # We repeat it a few times; kina messy
 
 n = all_pts 
-for i in range(10):
+for i in range(6):
     n = curver.thin_pt_cloud_2d(n)
 
     print("L2 error of thinned pts:", curver.l2_error(no_noise_pts, n))
@@ -86,3 +90,6 @@ for i in range(10):
     plt.gca().set_aspect('equal', adjustable='box')
     plt.show()
 
+
+#curver.propogate_normals(no_noise_pts)
+curver.propogate_normals(n)

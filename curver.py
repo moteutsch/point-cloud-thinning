@@ -29,9 +29,9 @@ def circle(how_many_pts):
     return np.array([ (np.sin(t), np.cos(t)) for t in np.linspace(0, 2 * np.pi, how_many_pts) ])
 
 # Generate points on a polynomial with coefficients "c"
-def polynomial_curve(c, how_many_pts):
+def polynomial_curve(c, how_many_pts, dom_size=2):
     poly = np.poly1d(c)
-    return np.array([ (t, poly(t)) for t in np.linspace(-2, 2, how_many_pts) ])
+    return np.array([ (t, poly(t)) for t in np.linspace(-dom_size, dom_size, how_many_pts) ])
 
 # Generate "n" points on curve "curve(t)" (a function taking a single parameter "t") with normal noise of STD "sigma"
 def pts_with_noise(curve, n, sigma=0.05):
@@ -107,8 +107,10 @@ def pt_correlations(pts, p):
 #
 # Note that rotations are necessary as, if "pts" form a vertical semi-circle, the best quadratic curve
 # isn't a function y(x) (it isn't single-valued). But after rotation, it will be.
-def quadractic_regression_curve(pts, p, plot=False):
+def quadratic_regression_curve(pts, p, plot=False):
     s, i, _, _, _ = linear_regression_line(pts, p)
+    l = np.array([ s, i ])
+
     if np.isnan(s):
         # Infinite slope: i.e., vertical line 
         theta = np.pi / 2
@@ -135,7 +137,7 @@ def quadractic_regression_curve(pts, p, plot=False):
         plt.scatter([ p_proj[0] ], [ p_proj[1] ], c='black') # To
         plt.scatter([ p[0] ], [ p[1] ], c='gray') # From
 
-    return z, p_proj
+    return p_proj, theta, z
 
 
 # Collect2 algorithm from paper (non-iterative version--contents of loop)
@@ -157,7 +159,7 @@ def collect2(pt, r, corr_tol, r_step, all_pts):
             return None
 
         A = ball(pt, H, all_pts)
-        if len(A) <= 5: 
+        if len(A) <= config.min_pts_for_correlation: 
             print("##### Warning: Not enough points for correlation")
             print("Debug info; pt:", pt, "H:", H, "A:", len(A))
             print()
@@ -183,8 +185,8 @@ def thin_single_pt_2d(pt, all_pts):
         print("### Warning: Could not find nbhd with sufficient correlation")
         return None
 
-    curve, pt_proj = quadractic_regression_curve(A, pt)
-    return pt_proj
+    pt_proj, line_theta, curve = quadratic_regression_curve(A, pt)
+    return pt_proj, line_theta, A
 
 
 # Perform 2D curve "thinning" for all points
@@ -201,9 +203,137 @@ def thin_pt_cloud_2d(pts):
             else:
                 pass # We ignore/remove this point
         else:
-            new_pts.append(res)
+            pt_proj, _, _ = res
+            new_pts.append(pt_proj)
 
     return np.array(new_pts)
+
+
+def propogate_normals(pts):
+    
+    G = nx.Graph()
+    mapping = {}
+    for pt, i in zip(pts, range(len(pts))):
+        res = thin_single_pt_2d(pt, pts)
+        if res is None:
+            print('Skipped point: ', pt)
+            continue
+
+        p_proj, l_theta, A = res
+
+        #print(l_theta)
+        #n = np.array((1, l[0] + l[1])) - np.array((0, l[1]))
+
+        n = np.array( ( np.cos(l_theta), np.sin(l_theta) ) )
+
+        #n = n / np.linalg.norm(n)
+        #print("Normal: ", n)
+
+        A_i = [ np.isclose(pts, A_pt).all(axis=1).nonzero()[0][0] for A_pt in A ]
+        #print(A_i)
+
+        mapping[i] = {
+            'normal': n,
+            'l_theta': l_theta,
+            'neighbors': A_i
+        }
+        G.add_node(i, posxy=pt)
+
+    pt_indices = mapping.keys()
+    if len(pt_indices) == 0:
+        print("Empty! Stopping.")
+        return
+
+    # Remove neighbors that were removed in previous step
+    for pt_i in pt_indices:
+        mapping[pt_i]['neighbors'] = list(set(pt_indices).intersection(set(mapping[pt_i]['neighbors'])))
+
+
+    for pt_i in pt_indices:
+        for n_i in mapping[pt_i]['neighbors']:
+            n1 = mapping[pt_i]['normal']
+            n2 = mapping[n_i]['normal']
+            if not G.has_edge(pt_i, n_i):
+                w = 1 - abs(np.dot(n1, n2))
+                G.add_edge(pt_i, n_i, weight=w)
+
+
+    T = nx.minimum_spanning_tree(G)
+
+    from networkx.drawing.nx_pylab import draw
+    positions = nx.get_node_attributes(T, 'posxy')
+    draw(T, positions)
+    plt.show()
+
+    #print("Hello")
+    #print(T.edges(data=True))
+    #print("Bye")
+
+    pt = 0
+
+    edge_order = list(nx.bfs_edges(T, source=pt))
+    for edge in edge_order:
+        n1 = mapping[edge[0]]['normal']
+        n2 = mapping[edge[1]]['normal']
+
+        # Re-orient if necessary
+        if np.dot(n1, n2) < 0:
+            mapping[edge[1]]['normal'] = -n2
+
+    # Now that normal orientations are propogated, we calculate the STD of normals by neighborhood
+    pts_i = list(mapping.keys())
+    #print(pts_i)
+    stds = []
+    normals = []
+    for pt_id in pts_i:
+        neighbors = mapping[pt_id]['neighbors']
+        std = np.std([ mapping[neighbor_i]['normal'] for neighbor_i in neighbors ], axis=0).mean()
+        mapping[pt_id]['std'] = float(std)
+        stds.append(std)
+        normals.append(mapping[pt_id]['normal'])
+    normals = np.array(normals)
+    stds = np.array(stds)
+
+
+    #print(pts)
+    #print(pts_i)
+    #print(np.histogram(stds))
+    # PLOT
+    #plt.clear()
+
+
+    pt_id = 0
+    #l = mapping[pt_id]['l']
+
+    #line_pts = np.array([ (t, t * l[0] + l[1]) for t in np.linspace(-1, 1, 100) ])
+    #plt.scatter(*(line_pts.T), s=0.3, alpha=0.3, color='orange')
+
+
+    from matplotlib.colors import Normalize
+    import matplotlib.cm as cm
+
+    norm = Normalize()
+    norm.autoscale(stds)
+
+    colormap = cm.inferno
+
+    #print('STDs', stds)
+
+
+    print(np.histogram(stds))
+    #plt.scatter(*(pts[pts_i].T), s=(stds * 50))
+    sc = plt.quiver(*(pts[pts_i].T), *(normals).T, color=colormap(norm(stds)), cmap=colormap)
+    plt.colorbar(sc)
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.show()
+
+
+    return mapping
+
+    #print(G)
+
+        
+
 
 ########################
 ########## 3D
@@ -289,7 +419,7 @@ def thin_single_pt_3d(pt, all_pts, ax=None):
         # We make it back to a 3D on mapped plane (we put the original coordinate and not "0" 
         # as there might be a small error in z-coordinate when projecting (maybe pt_on_plane[2] /= 0)
 
-        res_3d_mapped = np.hstack((res_2d, pt_on_plane[2]))
+        res_3d_mapped = np.hstack((res_2d[0], pt_on_plane[2]))
         #res_3d_mapped = np.hstack((res_2d, 0))
         res_3d = inv_map_pts([ res_3d_mapped ])[0]
 
