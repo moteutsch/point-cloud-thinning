@@ -6,18 +6,20 @@ import numpy as np
 
 #NUM_PTS = 120
 NUM_PTS = 150
-#CURVE = curver.circle
+CURVE = curver.circle
 #CURVE = lambda x: curver.polynomial_curve([1, 0, -8, 0, 0], x * 2)
-def CURVE(n): 
-    return curver.polynomial_curve([1/50, 0, -8/50, 0, 0], n, 4)
+#def CURVE(n): 
+#   return curver.polynomial_curve([1/50, 0, -8/50, 0, 0], n, 4)
+
+#CURVE = lambda n: np.array([ (t, 2 * np.cos(2 * t - 2)) for t in np.linspace(-4, 4, n) ])
 
 plt.gca().set_aspect('equal', adjustable='box')
         
 plt.scatter(*(CURVE(NUM_PTS).T))
 
 no_noise_pts = CURVE(NUM_PTS)
-#all_pts = curver.pts_with_noise(CURVE, NUM_PTS, 0.12)
 all_pts = curver.pts_with_noise(CURVE, NUM_PTS, 0.07)
+#all_pts = curver.pts_with_noise(CURVE, NUM_PTS, 0.05)
 
 print("L2 error of original pts:", curver.l2_error(no_noise_pts, no_noise_pts))
 print("L2 error of noisy pts:", curver.l2_error(no_noise_pts, all_pts))
