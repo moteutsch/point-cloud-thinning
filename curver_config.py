@@ -1,4 +1,5 @@
-is_debug = False
+is_debug = False # Actually verbose prints
+debug_show_plots = False  # May require "is_debug = True"
 
 min_pts_for_correlation = 5
 

@@ -89,11 +89,12 @@ def pt_correlations(pts, p):
     if config.is_debug:
         print("Pearson: %s" % rho)
         
-        line_pts = np.array([ (t, t) for t in np.linspace(-5, 5, 100) ])
+        if config.debug_show_plots:
+            line_pts = np.array([ (t, t) for t in np.linspace(-5, 5, 100) ])
 
-        plt.scatter(*(pts.T), color='red', alpha=0.5)
-        plt.scatter(*(line_pts.T), color='purple', alpha=0.3, s=0.5)
-        plt.show()
+            plt.scatter(*(pts.T), color='red', alpha=0.5)
+            plt.scatter(*(line_pts.T), color='purple', alpha=0.3, s=0.5)
+            plt.show()
 
     return rho, pts2
 
@@ -107,7 +108,9 @@ def pt_correlations(pts, p):
 #
 # Note that rotations are necessary as, if "pts" form a vertical semi-circle, the best quadratic curve
 # isn't a function y(x) (it isn't single-valued). But after rotation, it will be.
-def quadratic_regression_curve(pts, p, plot=False):
+
+# If not "fit_quadratic" then uses linear fit
+def quadratic_regression_curve(pts, p, fit_quadratic):
     s, i, _, _, _ = linear_regression_line(pts, p)
     l = np.array([ s, i ])
 
@@ -123,19 +126,42 @@ def quadratic_regression_curve(pts, p, plot=False):
     pts2 = np.array([ R.dot(pt - p) for pt in pts ])
     z = np.polyfit(*(pts2.T), 2) # 2 = quadratic (degree)
 
-    if plot:
+    if config.debug_show_plots:
         # Plot:
         poly = np.poly1d(z)
         poly_pts = np.array([ R_inv.dot((t, poly(t))) + p for t in np.linspace(-0.3, 0.3, 100) ])
         plt.scatter(*(poly_pts.T), c='cyan', s=0.1)
+
+        line_poly = np.poly1d(l)
+        line_pts = np.array([ (t, line_poly(t)) for t in np.linspace(-0.3, 0.3, 100) ])
+        plt.scatter(*(line_pts.T), c='orange', s=0.1)
+
+
         #
 
-    # p_proj = p projected onto quadratic curve
-    p_proj = R_inv.dot((0, z[-1])) + p
+    # "p" is at origin, so the projection onto polynomial curve (in the local coordinate system)
+    # is just the pt: (0, "the free coefficient of the polynomial")
+    if fit_quadratic:
+        # p_proj = p projected onto quadratic curve
+        local_coordinates_proj_p = (0, z[-1])
+        p_proj = R_inv.dot(local_coordinates_proj_p) + p
+    else:
+        # We calculate projection onto line, by translating plane moving line to pass through origin (isometry)
+        # projecting point onto line, and translating back
+        new_orig = np.array((0, l[-1]))
+        a = p - new_orig
+        line_vec = np.array( (np.cos(theta), np.sin(theta)) )
+        proj_len = np.dot(a, line_vec)
+        p_proj = proj_len * line_vec + new_orig
+        # p_proj = p projected ont linear curve
+        #local_coordinates_proj_p = (0, l[-1])
 
-    if plot:
+
+    if config.debug_show_plots:
+        plt.scatter(*(pts.T), color='red', alpha=0.5, s=15)
         plt.scatter([ p_proj[0] ], [ p_proj[1] ], c='black') # To
         plt.scatter([ p[0] ], [ p[1] ], c='gray') # From
+        plt.show()
 
     return p_proj, theta, z
 
@@ -150,13 +176,26 @@ def collect2(pt, r, corr_tol, r_step, all_pts):
     # We increase the size of ball of points around "pt" that are used for regressions
     # until their Pearson-coefficient passes "corr_tol" tolerance
 
+    A_history = []
+    rho_history = []
+
     H -= r_step # To balance addition at beginning
     while abs(rho) < corr_tol:
         H += r_step
         i += 1
         if i >= config.two_dim['max_collect2_iterations']:
             # Max steps until failure
-            return None
+            #return None
+
+            # If we haven't found correlation passing the threshold, we return maximum we've seen so far
+            i_max = np.argmax(rho_history)
+
+            if config.is_debug:
+                print("### Warning: Passed max collect2 iterations; returning maximal correlation nbhd")
+                print(pt, rho_history)
+                print()
+
+            return A_history[i_max], rho_history[i_max]
 
         A = ball(pt, H, all_pts)
         if len(A) <= config.min_pts_for_correlation: 
@@ -165,12 +204,23 @@ def collect2(pt, r, corr_tol, r_step, all_pts):
             print()
             continue # Not enough points for correlation
 
+
+        if config.debug_show_plots:
+            plt.scatter(*(A.T), color='red', alpha=0.5, s=15)
+            plt.scatter(*(all_pts.T), color='green', alpha=0.5, s=5)
+            plt.scatter(*(np.array([pt]).T), color='purple', alpha=1, s=15)
+            plt.show()
+
+
         rho, rot_pts = pt_correlations(A, pt)
+
+        A_history.append(A)
+        rho_history.append(rho)
 
         if config.is_debug:
             print("Iteration: %d; Rho: %s; H = %s" % (i, rho, H))
 
-    return A
+    return A, rho
 
 
 # Perform 2D curve "thinning" for point "pt"
@@ -180,12 +230,15 @@ def thin_single_pt_2d(pt, all_pts):
     r_step = config.two_dim['r_step']
     corr_tol = config.two_dim['min_correlation']
 
-    A = collect2(pt, r, corr_tol, r_step, all_pts)
+    A, rho = collect2(pt, r, corr_tol, r_step, all_pts)
     if A is None:
         print("### Warning: Could not find nbhd with sufficient correlation")
         return None
 
-    pt_proj, line_theta, curve = quadratic_regression_curve(A, pt)
+    
+    fit_quadratic = (abs(rho) < config.two_dim['min_correlation'])
+
+    pt_proj, line_theta, curve = quadratic_regression_curve(A, pt, fit_quadratic=fit_quadratic)
     return pt_proj, line_theta, A
 
 
@@ -262,7 +315,7 @@ def propogate_normals(pts):
 
     from networkx.drawing.nx_pylab import draw
     positions = nx.get_node_attributes(T, 'posxy')
-    draw(T, positions)
+    draw(T, positions, node_size=5.0)
     plt.show()
 
     #print("Hello")
